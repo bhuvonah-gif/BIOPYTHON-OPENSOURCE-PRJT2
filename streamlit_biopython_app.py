@@ -69,114 +69,139 @@ if show_summary:
 # == Reverse Complement & Translation UI ==
 if show_revtrans:
     st.subheader("Reverse Complement & Translation")
-    seq_choice = st.selectbox("Choose sequence", [r.id for r in records] if records else [], key="rev_choice")
-    table = st.checkbox("Show translation table details", False)
-    if seq_choice:
-        rec = next(r for r in records if r.id==seq_choice); seq = rec.seq
-        try:
-            st.markdown("**Reverse Complement**"); st.code(str(seq.reverse_complement()))
-            st.markdown("**Translation (standard table)**"); prot = seq.translate(to_stop=False)
-            st.code(str(prot)); st.markdown("**Protein molecular weight (Da)**")
-            try: st.write(round(molecular_weight(prot),3))
-            except Exception: st.write("Unable to compute molecular weight for translation.")
-            if table: st.write("Translation info: (showing first 200 aa)"); st.code(str(prot[:200]))
-        except Exception as e: st.error("Error computing translation or reverse complement: " + str(e))
+    if not records:
+        st.info("Upload FASTA to use this tool.")
+    else:
+        seq_choice = st.selectbox("Choose sequence", [r.id for r in records], key="rev_choice")
+        table = st.checkbox("Show translation table details", False)
+        if seq_choice:
+            rec = next(r for r in records if r.id==seq_choice); seq = rec.seq
+            try:
+                st.markdown("**Reverse Complement**"); st.code(str(seq.reverse_complement()))
+                st.markdown("**Translation (standard table)**"); prot = seq.translate(to_stop=False)
+                st.code(str(prot)); st.markdown("**Protein molecular weight (Da)**")
+                try:
+                    # molecular_weight defaults to DNA; for protein provide seq_type
+                    st.write(round(molecular_weight(str(prot), seq_type='protein'),3))
+                except Exception:
+                    st.write("Unable to compute molecular weight for translation.")
+                if table: st.write("Translation info: (showing first 200 aa)"); st.code(str(prot[:200]))
+            except Exception as e: st.error("Error computing translation or reverse complement: " + str(e))
 
 # == Six-frame ORF finder ==
 if show_orf:
     st.subheader("Six-frame translation and ORF finder")
-    seq_choice = st.selectbox("Choose sequence for ORF", [r.id for r in records] if records else [], key="orf_choice2")
-    min_orf_len = st.number_input("Minimum ORF length (aa)", 10, 10000, 30)
-    search_start_meth = st.selectbox("ORF search method", ["Start with M and end with Stop", "Any open region (no internal stop)"], key="orf_method")
-    if seq_choice:
-        rec = next(r for r in records if r.id==seq_choice); seq = rec.seq; frames = []
-        def find_orfs_simple(s, strand, frame):
-            prot = s.translate(to_stop=False); orfs = []
-            if search_start_meth=="Start with M and end with Stop":
-                for i, aa in enumerate(prot):
-                    if aa == "M":
-                        for j in range(i+1, len(prot)):
-                            if prot[j] == "*":
-                                length = j - i + 1
-                                if length >= min_orf_len: 
-                                    orfs.append({"strand": strand, "frame": frame, "aa_start": i, "aa_end": j, "length_aa": length,
-                                                 "protein": str(prot[i:j+1]), "nuc_start": (i*3)+frame, "nuc_end": (j*3)+frame+3})
-                                break
-            else:
-                start = None
-                for i, aa in enumerate(prot):
-                    if aa != "*" and start is None: start = i
-                    if aa == "*" and start is not None:
-                        length = i - start
-                        if length >= min_orf_len:
-                            orfs.append({"strand": strand, "frame": frame, "aa_start": start, "aa_end": i-1, "length_aa": length,
-                                "protein": str(prot[start:i]), "nuc_start": (start*3)+frame, "nuc_end": (i*3)+frame})
-                        start = None
-            return orfs
-        seq_str = seq
-        for strand, s in [(+1, seq_str), (-1, seq_str.reverse_complement())]:
-            for frame in range(3): s_frame = s[frame:]; frames += find_orfs_simple(s_frame, strand, frame)
-        if frames:
-            df_orfs = pd.DataFrame(frames).sort_values("length_aa", ascending=False)
-            st.dataframe(df_orfs)
-            st.markdown(download_link(df_orfs.to_csv(index=False).encode('utf-8'), "orfs.csv", "Download ORFs CSV"), unsafe_allow_html=True)
-        else: st.write("No ORFs found meeting the length threshold. Try lowering the threshold.")
+    if not records:
+        st.info("Upload FASTA to use this tool.")
+    else:
+        seq_choice = st.selectbox("Choose sequence for ORF", [r.id for r in records], key="orf_choice2")
+        min_orf_len = st.number_input("Minimum ORF length (aa)", 10, 10000, 30)
+        search_start_meth = st.selectbox("ORF search method", ["Start with M and end with Stop", "Any open region (no internal stop)"], key="orf_method")
+        if seq_choice:
+            rec = next(r for r in records if r.id==seq_choice); seq = rec.seq; frames = []
+            def find_orfs_simple(s, strand, frame):
+                prot = s.translate(to_stop=False); orfs = []
+                if search_start_meth=="Start with M and end with Stop":
+                    for i, aa in enumerate(prot):
+                        if aa == "M":
+                            for j in range(i+1, len(prot)):
+                                if prot[j] == "*":
+                                    length = j - i + 1
+                                    if length >= min_orf_len:
+                                        orfs.append({"strand": strand, "frame": frame, "aa_start": i, "aa_end": j, "length_aa": length,
+                                                     "protein": str(prot[i:j+1]), "nuc_start": (i*3)+frame, "nuc_end": (j*3)+frame+3})
+                                    break
+                else:
+                    start = None
+                    for i, aa in enumerate(prot):
+                        if aa != "*" and start is None: start = i
+                        if aa == "*" and start is not None:
+                            length = i - start
+                            if length >= min_orf_len:
+                                orfs.append({"strand": strand, "frame": frame, "aa_start": start, "aa_end": i-1, "length_aa": length,
+                                    "protein": str(prot[start:i]), "nuc_start": (start*3)+frame, "nuc_end": (i*3)+frame})
+                            start = None
+                return orfs
+            seq_str = seq
+            for strand, s in [(+1, seq_str), (-1, seq_str.reverse_complement())]:
+                for frame in range(3):
+                    s_frame = s[frame:]; frames += find_orfs_simple(s_frame, strand, frame)
+            if frames:
+                df_orfs = pd.DataFrame(frames).sort_values("length_aa", ascending=False)
+                st.dataframe(df_orfs)
+                st.markdown(download_link(df_orfs.to_csv(index=False).encode('utf-8'), "orfs.csv", "Download ORFs CSV"), unsafe_allow_html=True)
+            else: st.write("No ORFs found meeting the length threshold. Try lowering the threshold.")
 
 # == Pairwise alignment tool. Fixed indentation error ==
 if show_align:
     st.subheader("Pairwise alignment")
-    seqs = [r.id for r in records]
-    if len(seqs) < 2: st.info("Upload FASTA with at least two sequences to align.")
+    if not records or len(records) < 2:
+        st.info("Upload FASTA with at least two sequences to align.")
     else:
+        seqs = [r.id for r in records]
         s1 = st.selectbox("Sequence 1", seqs, key="s1"); s2 = st.selectbox("Sequence 2", seqs, key="s2")
         method = st.radio("Method", ["global", "local"], key="align_method")
         rec1 = next(r for r in records if r.id==s1); rec2 = next(r for r in records if r.id==s2)
         if st.button("Run alignment", key="align_btn"):
             try:
-                alns = pairwise2.align.globalxx(str(rec1.seq), str(rec2.seq), one_alignment_only=True) if method=="global" else pairwise2.align.localxx(str(rec1.seq), str(rec2.seq), one_alignment_only=True)
+                # Use correct one_alignment_only parameter (True/False)
+                if method == "global":
+                    alns = pairwise2.align.globalxx(str(rec1.seq), str(rec2.seq), one_alignment_only=True)
+                else:
+                    alns = pairwise2.align.localxx(str(rec1.seq), str(rec2.seq), one_alignment_only=True)
                 if alns:
                     aln = alns[0]
                     st.text(format_alignment(*aln))
                     aln_text = format_alignment(*aln)
                     st.markdown(download_link(aln_text.encode('utf-8'), f"alignment_{s1}_vs_{s2}.txt", "Download alignment"), unsafe_allow_html=True)
                 else: st.write("No alignment found.")
-            except Exception as e: st.error("Alignment failed: " + str(e)); st.text(traceback.format_exc())
+            except Exception as e:
+                st.error("Alignment failed: " + str(e)); st.text(traceback.format_exc())
 
 # == Motif (restriction/regex) search ==
 if show_motif:
     st.subheader("Motif / Restriction search")
-    motif = st.text_input("Enter motif (DNA regex, e.g., 'GAATTC' for EcoRI)")
-    seq_choice = st.selectbox("Choose sequence", [r.id for r in records] if records else [], key="motif_seq")
-    if motif and seq_choice:
-        rec = next(r for r in records if r.id==seq_choice); seq = str(rec.seq); import re
-        try:
-            matches = [(m.start()+1, m.group(0)) for m in re.finditer(motif, seq)]
-            st.write(f"Occurrences: {len(matches)}")
-            if matches:
-                dfm = pd.DataFrame(matches, columns=["start","motif"])
-                st.dataframe(dfm)
-                st.markdown(download_link(dfm.to_csv(index=False).encode('utf-8'), "motif_hits.csv", "Download motif hits"), unsafe_allow_html=True)
-        except re.error as e: st.error("Invalid regex provided: " + str(e))
+    if not records:
+        st.info("Upload FASTA to use this tool.")
+    else:
+        motif = st.text_input("Enter motif (DNA regex, e.g., 'GAATTC' for EcoRI)")
+        seq_choice = st.selectbox("Choose sequence", [r.id for r in records], key="motif_seq")
+        if motif and seq_choice:
+            rec = next(r for r in records if r.id==seq_choice); seq = str(rec.seq); import re
+            try:
+                matches = [(m.start()+1, m.group(0)) for m in re.finditer(motif, seq)]
+                st.write(f"Occurrences: {len(matches)}")
+                if matches:
+                    dfm = pd.DataFrame(matches, columns=["start","motif"])
+                    st.dataframe(dfm)
+                    st.markdown(download_link(dfm.to_csv(index=False).encode('utf-8'), "motif_hits.csv", "Download motif hits"), unsafe_allow_html=True)
+            except re.error as e: st.error("Invalid regex provided: " + str(e))
 
 # == Codon usage and GC distribution plotting ==
 if show_codon:
     st.subheader("Codon usage & GC distribution plots")
-    seq_choice = st.selectbox("Choose sequence", [r.id for r in records] if records else [], key="codon_seq")
-    if seq_choice:
-        rec = next(r for r in records if r.id==seq_choice); seq = str(rec.seq)
-        codons = [seq[i:i+3] for i in range(0, len(seq)-2, 3)]; codon_counts = {}
-        for c in codons: codon_counts[c] = codon_counts.get(c,0)+1 if len(c)==3 else codon_counts.get(c,0)
-        df_codon = pd.DataFrame(list(codon_counts.items()), columns=["Codon","Count"]).sort_values("Count", ascending=False)
-        st.dataframe(df_codon)
-        st.markdown(download_link(df_codon.to_csv(index=False).encode('utf-8'), "codon_usage.csv", "Download codon table"), unsafe_allow_html=True)
-        fig, ax = plt.subplots(figsize=(8,4)); ax.bar(df_codon['Codon'], df_codon['Count'])
-        ax.set_xlabel("Codon"); ax.set_ylabel("Count"); ax.set_title("Codon usage (frame 0)")
-        plt.xticks(rotation=90); st.pyplot(fig)
-        window = st.slider("GC sliding window (bp)", 10, 200, 50); seq_upper = seq.upper(); gc_values, positions = [], []
-        for i in range(0, max(1, len(seq_upper)-window+1), window//2):
-            win = seq_upper[i:i+window]; positions.append(i+1); gc_values.append(gc_fraction(win)*100)
-        fig2, ax2 = plt.subplots(figsize=(8,3)); ax2.plot(positions, gc_values)
-        ax2.set_xlabel("Position (bp)"); ax2.set_ylabel("GC%"); ax2.set_title("Sliding-window GC%"); st.pyplot(fig2)
+    if not records:
+        st.info("Upload FASTA to use this tool.")
+    else:
+        seq_choice = st.selectbox("Choose sequence", [r.id for r in records], key="codon_seq")
+        if seq_choice:
+            rec = next(r for r in records if r.id==seq_choice); seq = str(rec.seq)
+            codons = [seq[i:i+3] for i in range(0, len(seq)-2, 3)]; codon_counts = {}
+            for c in codons:
+                if len(c) == 3:
+                    codon_counts[c] = codon_counts.get(c,0) + 1
+            df_codon = pd.DataFrame(list(codon_counts.items()), columns=["Codon","Count"]).sort_values("Count", ascending=False)
+            st.dataframe(df_codon)
+            st.markdown(download_link(df_codon.to_csv(index=False).encode('utf-8'), "codon_usage.csv", "Download codon table"), unsafe_allow_html=True)
+            fig, ax = plt.subplots(figsize=(8,4)); ax.bar(df_codon['Codon'], df_codon['Count'])
+            ax.set_xlabel("Codon"); ax.set_ylabel("Count"); ax.set_title("Codon usage (frame 0)")
+            plt.xticks(rotation=90); st.pyplot(fig)
+            window = st.slider("GC sliding window (bp)", 10, 200, 50); seq_upper = seq.upper(); gc_values, positions = [], []
+            step = max(1, window // 2)
+            for i in range(0, max(1, len(seq_upper)-window+1), step):
+                win = seq_upper[i:i+window]; positions.append(i+1); gc_values.append(gc_fraction(win)*100)
+            fig2, ax2 = plt.subplots(figsize=(8,3)); ax2.plot(positions, gc_values)
+            ax2.set_xlabel("Position (bp)"); ax2.set_ylabel("GC%"); ax2.set_title("Sliding-window GC%"); st.pyplot(fig2)
 
 # == Sidebar information and developer export block ==
 st.sidebar.markdown("---"); st.sidebar.markdown("Developed with Biopython & Streamlit. No external network calls are made.")
@@ -188,7 +213,11 @@ def make_zip_bytes(files):
     buf = BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         for fpath, arcname in files:
-            zf.writestr(arcname, open(fpath, "rb").read())
+            # Guard opening files that may not exist in runtime container
+            if os.path.exists(fpath):
+                zf.writestr(arcname, open(fpath, "rb").read())
+            else:
+                zf.writestr(arcname, f"# File {fpath} not found on server; not included.\n")
     return buf.getvalue()
 
 if st.sidebar.button("Create app zip (for download)"):
