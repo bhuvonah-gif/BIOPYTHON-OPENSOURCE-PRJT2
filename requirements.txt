@@ -1,4 +1,4 @@
 steamlit
 biopython
 pandas
-matpltlib
+matplotlib
